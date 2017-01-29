@@ -1,0 +1,154 @@
+---
+title: "Practical Machine Learning final course project"
+Author: Kishore Mamidi
+Date: January, 28, 2017
+output: html_document
+---
+
+## Executive Summary
+
+The goal of this study is to predict the manner in which participants did the exercise.
+The outcome variable for the model is classe, which is a factor variable with 5 levels. Classe is determined based on the way the study, participants performed one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl. Here are desciptions of the 5 levels of Classe
+
+- exactly according to the specification (Class A)
+- throwing the elbows to the front (Class B)
+- lifting the dumbbell only halfway (Class C)
+- lowering the dumbbell only halfway (Class D)
+- throwing the hips to the front (Class E)
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes."
+
+Models will be evaluated based on the accuracy of prediction, and the predictors are selected by eliminating all variables near zero variance, those with missing predictors, and eliminating other variables like names, id's, timestamps etc.,
+
+The study uses the caret package to compare the prediction based on the rPart decision tree model, and random forests model. We conclude that the random-forests prediction model gives a prediction acuracy of 99.3%. The expected out-of-sample error (calculated as 1 - accuracy) was 0.67% for predictions made against the cross-validation set.
+
+
+```{r necessaryRPackages, cache=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+```
+
+## Getting and cleaning Data
+```{r loadData, cache=TRUE}
+    URL_training <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+    URL_test <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+    masterTrainingSet <- read.csv(url(URL_training), na.strings = c("NA", "#DIV/0!",""))
+    finalTestingSet  <- read.csv(url(URL_test), na.strings = c("NA", "#DIV/0!",""))
+```
+
+## Partioning the training set into two
+
+Partionining training data set into two data sets, 60% for my training, 40% for my testing
+
+```{r dataPartition, cache=TRUE}
+    set.seed(12334)
+    inTrain <- createDataPartition(y=masterTrainingSet$classe,p=0.75, list = FALSE)
+    trainingSet <- masterTrainingSet[inTrain,]
+    testingSet <- masterTrainingSet[-inTrain,]
+```
+
+## Data Cleanup
+
+First, I remove the variables like ID, name, timestamps, window etc., from the dataset to avoid any potential interference with the prediction algorithms
+
+```{r dataCleanup1, cache=TRUE}
+notVar1 <- grep("name|timestamp|window|X", colnames(trainingSet), value=F)
+trainingSet <- trainingSet[-notVar1]
+dim(trainingSet)
+```
+
+
+Given the large number of predicotr at this stage, I will remove any columns that have atleast one NA value in them i.e., only keep columns where there are no missing values (NA's)
+```{r dataCleanup2, cache=TRUE}
+trainingSet<-trainingSet[,colSums(is.na(trainingSet)) == 0]
+dim(trainingSet)
+```
+
+Now, we will look for and eliminate any predictors that have a near zero variance
+
+```{r dataCleanup3, cache=TRUE}
+#remove any Variables with NearZeroVariance where freqCut >19, and uniqueCut < 10 (default values)
+myDataNZV <- nearZeroVar(trainingSet, freqCut = 95/5, uniqueCut= 10, saveMetrics=TRUE)
+nonNZVvars <- subset(myDataNZV, nzv == FALSE)
+trainingSet <- trainingSet[rownames(nonNZVvars)]
+dim(trainingSet)
+```
+
+Given that the data is down to a more manageable no. of predictors (53), let's look at the frequency of our output variable 'classe'
+```{r plotFrequency, cache=TRUE}
+plot(trainingSet$classe, col="green", main="Frequency of classe within the training set", xlab="Classe", ylab="Frequency")
+```
+
+From the graph above, we can see that each level frequency is within the same order of magnitude of each other. Level A is the most frequent with more than 4000 occurrences while level D is the least frequent with about 2500 occurrences
+
+Next, I filter by cross-validation testing set, and the master testing set to the set of shortlisted predictors used for the training data
+
+```{r dataCleanup4, cache=TRUE}
+#Transformation 4
+#Transform the testing data sets the same way
+cleanColNames <- names(trainingSet)
+testingSet <- testingSet[cleanColNames]
+dim(testingSet)
+finalTestingSet <- finalTestingSet[cleanColNames[1:52]] #testing does not the classe variable
+```
+
+
+Finally, in order to elimate any interference from non-coherent data types in the training and prediction set, I coerce the data into the same type.
+
+```{r dataCleanup5, cache=TRUE}
+for (i in 1:length(finalTestingSet) ) {
+    for(j in 1:length(trainingSet)) {
+        if( length( grep(names(trainingSet[i]), names(finalTestingSet)[j]) ) ==1)  {
+            class(finalTestingSet[j]) <- class(trainingSet[i])
+        }      
+    }      
+}
+```
+
+## Decision Tree Model
+I use the subsetted training data to fit an rpart decision-tree model
+
+```{r decionTreeTraining, cache=TRUE}
+modFitDT <- train(classe ~ ., data=trainingSet, method="rpart") #try with method = "class"
+```
+let's view the decision tree with fancy
+
+```{r decionTreePlot, cache=TRUE}
+fancyRpartPlot(modFitDT$finalModel)
+```
+
+lets use the subset of the test data to predict classe, and see model fit
+
+```{r decionTreePredition, cache=TRUE}
+predictDT <- predict(modFitDT, newdata = testingSet)
+confusionMatrix(predictDT, testingSet$classe)
+```
+
+We get an accuracy rate of ~48.7 % which is not that great.
+
+## Random Forests Model
+```{r randomForest, cache=TRUE}
+#Second prediction model: Using Random Forests
+modFitRF <- train(classe ~ ., data=trainingSet, method="rf")
+predictRF <- predict(modFitRF, newdata = testingSet)
+confusionMatrix(predictRF, testingSet$classe)
+```
+
+Random Forests model yields a much better result with an accuracy rate of 99.33 %.
+We can calulate out of sample error rate as 1- accuracy = 0.67%.
+
+## Predicting the Classe for real test data
+
+```{r randomForestPredictFinal, cache=TRUE}
+finalPrediction <- predict(modFitRF, finalTestingSet)
+finalPrediction
+```
+
+## Conclusion
+
+With an out of sample error of 0.67%, the random forest model is doing a decent job of predicting the exercise classes during weight lifting.
